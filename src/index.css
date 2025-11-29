@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* === ESTA ES LA LÍNEA MÁGICA QUE TE FALTA === */
+/* Esto le dice a Tailwind: "Solo activa el modo oscuro si ves la clase .dark" */
+/* Sobrescribe el comportamiento por defecto de mirar el sistema operativo */
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  html {
+    /* Transición suave para que no sea un golpe de cambio de color */
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  body {
+    /* Fondo CLARO por defecto (slate-50) */
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  /* Fondo OSCURO cuando la clase .dark está presente */
+  html.dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+/* Scrollbar personalizada (opcional, para que combine) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 dark:bg-slate-700 rounded-full;
+}
