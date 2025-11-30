@@ -14,6 +14,7 @@ import InventarioPage from '../modules/inventario/pages/InventarioPage';
 import CotizacionesPage from '../modules/cotizaciones/pages/CotizacionesPage';
 import VentasPage from '../modules/ventas/pages/VentasPage';
 import ReportesPage from '../modules/reportes/pages/ReportesPage';
+import ClientsPage from '../modules/crm/pages/ClientsPage';
 
 export default function AppRoutes() {
   return (
@@ -42,6 +43,8 @@ export default function AppRoutes() {
           <Route path="cotizaciones/*" element={<CotizacionesPage />} />
           <Route path="ventas/*" element={<VentasPage />} />
           <Route path="reportes/*" element={<ReportesPage />} />
+          <Route path="crm" element={<ClientsPage />} />
+          
         </Route>
 
         <Route path="*" element={<Navigate to="/auth/login" />} />
