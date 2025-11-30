@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Users, Package, FileText, ShoppingCart, BarChart3, Box, Briefcase, X } from 'lucide-react';
+import { Users, Package, FileText, ShoppingCart, BarChart3, Box, Briefcase, X , Settings} from 'lucide-react';
 
 const menuItems = [
   { path: '/inventario', label: 'Inventario', icon: Package },
@@ -8,6 +8,7 @@ const menuItems = [
   { path: '/cotizaciones', label: 'Cotizaciones', icon: FileText },
   { path: '/trabajadores', label: 'Trabajadores', icon: Users },
   { path: '/reportes', label: 'Reportes', icon: BarChart3 },
+  { path: '/configuracion', label: 'Configuración', icon: Settings }
 ];
 
 export default function Sidebar({ isOpen, onClose }) {

@@ -15,6 +15,8 @@ import CotizacionesPage from '../modules/cotizaciones/pages/CotizacionesPage';
 import VentasPage from '../modules/ventas/pages/VentasPage';
 import ReportesPage from '../modules/reportes/pages/ReportesPage';
 import ClientsPage from '../modules/crm/pages/ClientsPage';
+import NewSalePage from '../modules/ventas/pages/NewSalePage';
+import ConfigPage from '../modules/configuracion/pages/ConfigPage';
 
 export default function AppRoutes() {
   return (
@@ -41,9 +43,10 @@ export default function AppRoutes() {
           <Route path="trabajadores/*" element={<TrabajadoresPage />} />
           <Route path="inventario/*" element={<InventarioPage />} />
           <Route path="cotizaciones/*" element={<CotizacionesPage />} />
-          <Route path="ventas/*" element={<VentasPage />} />
+          <Route path="ventas" element={<NewSalePage />} />
           <Route path="reportes/*" element={<ReportesPage />} />
           <Route path="crm" element={<ClientsPage />} />
+          <Route path="configuracion" element={<ConfigPage />} />
           
         </Route>
 
