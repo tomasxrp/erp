@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, Trash2, ShoppingCart, UserPlus, FileText, Loader2 } from 'lucide-react';
+import { Search, Plus, Trash2, ShoppingCart, UserPlus, FileText, Loader2, Minus, Package, Wrench } from 'lucide-react';
 import { supabase } from '../../../config/supabase';
 import { inventoryService } from '../../inventario/services/inventoryService';
+import { servicesService } from '../../servicios/services/servicesService'; // <--- IMPORTANTE
 import { crmService } from '../../crm/services/crmService';
 import { generateDocumentPDF } from '../../../shared/utils/pdfGenerator';
 import ClientForm from '../../crm/components/ClientForm';
 
 export default function NewSalePage() {
   // Estados de Datos
-  const [products, setProducts] = useState([]);
+  const [allItems, setAllItems] = useState([]); // Productos + Servicios mezclados
   const [clients, setClients] = useState([]);
   const [companySettings, setCompanySettings] = useState({});
   
@@ -17,6 +18,7 @@ export default function NewSalePage() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [cart, setCart] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [quoteNumber, setQuoteNumber] = useState('');
   
   // Estados de UI
   const [loading, setLoading] = useState(true);
@@ -29,14 +31,30 @@ export default function NewSalePage() {
 
   async function loadData() {
     try {
-      const [p, c, s] = await Promise.all([
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('warehouse_id')
+        .eq('id', user.id)
+        .single();
+
+      // Cargamos Productos, Servicios y Clientes en paralelo
+      const [prods, servs, cli, settings] = await Promise.all([
         inventoryService.getProducts(),
+        servicesService.getServices(),
         crmService.getClients(),
-        supabase.from('company_settings').select('*').single()
+        supabase.from('company_settings').select('*').eq('warehouse_id', profile.warehouse_id).single()
       ]);
-      setProducts(p);
-      setClients(c || []); // Aseguramos array aunque venga null
-      if (s.data) setCompanySettings(s.data);
+      
+      // Unificamos la lista añadiendo un campo "type"
+      const taggedProducts = (prods || []).map(p => ({ ...p, itemType: 'product' }));
+      const taggedServices = (servs || []).map(s => ({ ...s, itemType: 'service', total_stock: Infinity })); // Servicios tienen stock infinito
+      
+      setAllItems([...taggedProducts, ...taggedServices]);
+      setClients(cli || []);
+      if (settings.data) setCompanySettings(settings.data);
+
     } catch (e) { 
       console.error("Error cargando datos:", e); 
     } finally { 
@@ -44,149 +62,222 @@ export default function NewSalePage() {
     }
   }
 
-  // Lógica del Carrito
-  const addToCart = (product) => {
-    const existing = cart.find(item => item.id === product.id);
+  // Agregar al Carrito
+  const addToCart = (item) => {
+    const existing = cart.find(cartItem => cartItem.id === item.id);
     if (existing) {
-      if (existing.quantity >= product.total_stock) return alert("No hay más stock disponible");
-      setCart(cart.map(item => item.id === product.id ? {...item, quantity: item.quantity + 1} : item));
+      handleUpdateQuantity(item.id, 1);
     } else {
-      if (product.total_stock < 1) return alert("Sin stock");
-      setCart([...cart, { ...product, quantity: 1, unit_price: product.price }]);
+      // Validación de Stock inicial (Solo para productos)
+      if (item.itemType === 'product' && docType !== 'cotizacion' && item.total_stock < 1) {
+        return alert("Sin stock disponible");
+      }
+      setCart([...cart, { ...item, quantity: 1, unit_price: item.price }]);
     }
+  };
+
+  // Actualizar Cantidad (+/-)
+  const handleUpdateQuantity = (id, delta) => {
+    setCart(prevCart => prevCart.map(item => {
+      if (item.id === id) {
+        const newQuantity = item.quantity + delta;
+        
+        // 1. Validar Stock Máximo (Solo si es Producto y NO es cotización)
+        if (delta > 0 && item.itemType === 'product' && docType !== 'cotizacion' && newQuantity > item.total_stock) {
+          alert(`Solo quedan ${item.total_stock} unidades disponibles.`);
+          return item;
+        }
+
+        // 2. Validar Mínimo 1
+        if (newQuantity < 1) return item;
+
+        return { ...item, quantity: newQuantity };
+      }
+      return item;
+    }));
   };
 
   const removeFromCart = (id) => setCart(cart.filter(item => item.id !== id));
 
-  // Cálculos (Chile: IVA 19%)
   const calculateTotals = () => {
     const total = cart.reduce((acc, item) => acc + (item.unit_price * item.quantity), 0);
     let net = total;
     let tax = 0;
 
     if (docType === 'factura') {
-      // En factura, asumimos que los precios de lista son BRUTOS (con IVA) y desglosamos
       net = Math.round(total / 1.19);
       tax = total - net;
-    } 
-    // Para boleta y cotización, el total es directo y el IVA es interno (o no aplica visualmente)
+    }
     
     return { net, tax, total };
   };
 
-  // Guardar Venta
   const handleCheckout = async () => {
     if (cart.length === 0) return alert("El carrito está vacío");
-    if (!selectedClient && docType === 'factura') return alert("La factura requiere seleccionar un cliente registrado");
+    if (!selectedClient && (docType === 'factura' || docType === 'cotizacion')) {
+        return alert("Debes seleccionar un cliente para este documento.");
+    }
     
     setProcessing(true);
     const { net, tax, total } = calculateTotals();
-    const receiptNumber = Date.now().toString().slice(-6); // Simulación de folio simple
+    const receiptNumber = Date.now().toString().slice(-6);
 
     try {
-      // 1. Obtener usuario actual
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No hay usuario autenticado');
 
-      // 2. Guardar Cabecera de Venta
+      const { data: profile } = await supabase.from('profiles').select('warehouse_id').eq('id', user.id).single();
+      if (!profile?.warehouse_id) throw new Error('No se pudo obtener la bodega del usuario');
+
+      // 1. Guardar Cabecera Venta
       const { data: sale, error } = await supabase.from('sales').insert([{
-        user_id: user?.id,
+        user_id: user.id,
         client_id: selectedClient?.id || null,
-        client_snapshot: selectedClient || { name: 'Cliente General' }, // Guardamos snapshot
+        client_snapshot: selectedClient || { name: 'Cliente General' },
         total_amount: total,
         net_amount: net,
         tax_amount: tax,
         type: docType,
         receipt_number: receiptNumber,
-        status: 'completada' // Columna que agregamos recientemente
+        status: 'completada',
+        warehouse_id: profile.warehouse_id
       }]).select().single();
 
       if (error) throw error;
 
-      // 3. Guardar Items de Venta
-      const saleItems = cart.map(item => ({
+      // 2. Guardar Items (Mapeando product_id O service_id)
+      const saleItemsToInsert = cart.map(item => ({
         sale_id: sale.id,
-        product_id: item.id,
+        product_id: item.itemType === 'product' ? item.id : null, // ID si es producto
+        service_id: item.itemType === 'service' ? item.id : null, // ID si es servicio
         product_name: item.name,
         quantity: item.quantity,
         unit_price: item.unit_price
       }));
       
-      const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
+      const { error: itemsError } = await supabase.from('sale_items').insert(saleItemsToInsert);
       if (itemsError) throw itemsError;
 
-      // 4. Descontar Stock (Lógica simple para MVP: Bodega Principal)
-      // Nota: Si quieres un descuento multi-bodega real, necesitarías iterar 'product_stocks'
+      // 3. Descontar Stock (SOLO PRODUCTOS y si NO es cotización)
       if (docType !== 'cotizacion') {
-        // Aquí podrías implementar la lógica de descuento de stock si lo deseas
+        for (const item of cart) {
+          if (item.itemType === 'product') { // Solo descontamos productos
+            try {
+              await supabase.rpc('decrement_stock', {
+                p_product_id: item.id,
+                p_warehouse_id: profile.warehouse_id,
+                p_quantity: item.quantity
+              });
+            } catch (stockError) {
+              console.warn('Error al descontar stock:', stockError);
+            }
+          }
+        }
       }
 
-      // 5. Generar PDF (Con Await para esperar la imagen)
-      await generateDocumentPDF(sale, companySettings, saleItems);
+      // 4. Generar PDF
+      const saleForPdf = { ...sale, quote_number_manual: quoteNumber };
+      await generateDocumentPDF(saleForPdf, companySettings, saleItemsToInsert);
 
       alert(`¡${docType.charAt(0).toUpperCase() + docType.slice(1)} generada correctamente!`);
       
-      // Limpiar estado
       setCart([]);
       setSelectedClient(null);
+      setQuoteNumber('');
+      await loadData(); 
 
     } catch (e) {
-      console.error(e);
-      alert("Error al procesar venta: " + e.message);
+      console.error('Error en venta:', e);
+      alert("Error al procesar: " + e.message);
     } finally {
       setProcessing(false);
     }
   };
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.sku?.toLowerCase().includes(searchTerm.toLowerCase())
+  // Filtrado Unificado
+  const filteredItems = allItems.filter(item => 
+    item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  if (loading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin text-blue-600" /></div>;
+  if (loading) return (
+    <div className="flex h-screen items-center justify-center">
+      <Loader2 className="animate-spin text-blue-600" size={48} />
+    </div>
+  );
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-100px)] gap-6">
       
-      {/* IZQUIERDA: Catálogo de Productos */}
-      <div className="flex-1 flex flex-col gap-4 min-h-0"> {/* min-h-0 es clave para scroll en flex */}
-        
-        {/* Barra de búsqueda */}
+      {/* IZQUIERDA: Catálogo Unificado */}
+      <div className="flex-1 flex flex-col gap-4 min-h-0">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex gap-4 shrink-0">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-2.5 text-slate-400" size={20} />
             <input 
               className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg outline-none text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500/50"
-              placeholder="Buscar productos por nombre o SKU..."
+              placeholder="Buscar productos o servicios..."
               onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
         </div>
 
-        {/* Grid Productos (Scrollable) */}
         <div className="flex-1 overflow-y-auto pr-2 pb-4">
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredProducts.map(product => (
-              <div key={product.id} 
-                onClick={() => addToCart(product)}
-                className="group bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-blue-500 hover:shadow-md cursor-pointer transition-all flex flex-col justify-between h-40"
+            {filteredItems.map(item => (
+              <div 
+                key={item.id} 
+                onClick={() => addToCart(item)}
+                className={`group p-4 rounded-xl border hover:shadow-md cursor-pointer transition-all flex flex-col justify-between h-40 relative overflow-hidden
+                  ${item.itemType === 'service' 
+                    ? 'bg-blue-50/50 dark:bg-slate-900 border-blue-200 dark:border-blue-900/30 hover:border-blue-400' 
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-400'
+                  }`}
               >
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-white line-clamp-2 text-sm leading-snug group-hover:text-blue-600 transition-colors">
-                    {product.name}
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">{product.sku}</p>
+                {/* Icono de Fondo */}
+                <div className="absolute -right-4 -bottom-4 opacity-5 pointer-events-none">
+                   {item.itemType === 'service' 
+                     ? <Wrench size={100} className="text-blue-600" /> 
+                     : <Package size={100} className="text-emerald-600" />
+                   }
                 </div>
-                <div className="flex justify-between items-end mt-2">
-                  <span className="font-bold text-blue-600 dark:text-blue-400 text-lg">
-                    ${product.price.toLocaleString()}
+
+                <div>
+                  <div className="flex items-start justify-between mb-1">
+                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                        item.itemType === 'service' 
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' 
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                     }`}>
+                        {item.itemType === 'service' ? 'Servicio' : 'Producto'}
+                     </span>
+                  </div>
+                  <h3 className="font-bold text-slate-900 dark:text-white line-clamp-2 text-sm leading-snug">
+                    {item.name}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
+                    {item.itemType === 'product' ? item.sku : item.category}
+                  </p>
+                </div>
+                
+                <div className="flex justify-between items-end mt-2 z-10">
+                  <span className="font-bold text-slate-900 dark:text-white text-lg">
+                    ${item.price.toLocaleString()}
                   </span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    product.total_stock > 5 
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
-                      : 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
-                  }`}>
-                    {product.total_stock} {product.unit}
-                  </span>
+                  
+                  {item.itemType === 'product' ? (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        item.total_stock > 5 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
+                        : 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
+                    }`}>
+                        {item.total_stock} {item.unit}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800">
+                        {item.unit}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -194,17 +285,15 @@ export default function NewSalePage() {
         </div>
       </div>
 
-      {/* DERECHA: Panel de Venta (Carrito) */}
+      {/* DERECHA: Carrito (Igual que antes pero ahora soporta servicios) */}
       <div className="w-full lg:w-96 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 flex flex-col shrink-0 lg:h-full h-auto">
         
-        {/* Header Carrito */}
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 rounded-t-2xl shrink-0">
           <h2 className="font-bold text-lg flex items-center gap-2 text-slate-900 dark:text-white">
             <ShoppingCart size={20} className="text-blue-600" /> Nueva Venta
           </h2>
         </div>
 
-        {/* Configuración (Tipo y Cliente) */}
         <div className="p-4 space-y-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           {/* Selector Tipo */}
           <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
@@ -236,72 +325,80 @@ export default function NewSalePage() {
               onChange={e => setSelectedClient(clients.find(c => c.id === e.target.value))}
               value={selectedClient?.id || ''}
             >
-              <option value="">Cliente General / Mostrador</option>
+              <option value="">Seleccionar Cliente...</option>
               {clients.map(c => (
                 <option key={c.id} value={c.id}>{c.name} ({c.tax_id || 'Sin ID'})</option>
               ))}
             </select>
           </div>
+
+          {/* Input Cotización */}
+          {docType === 'cotizacion' && (
+            <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+              <label className="text-xs font-bold uppercase text-slate-500">N° Cotización</label>
+              <div className="relative mt-1">
+                 <FileText className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                 <input
+                   type="text"
+                   className="w-full pl-9 pr-4 py-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg text-sm outline-none text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500/20 placeholder-slate-400"
+                   placeholder="Ej: COT-2025-001"
+                   value={quoteNumber}
+                   onChange={e => setQuoteNumber(e.target.value)}
+                 />
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Lista Items (Scrollable) */}
+        {/* Lista Items con Botones +/- */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px]">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2 opacity-60">
               <ShoppingCart size={48} className="stroke-1" />
-              <p className="text-sm">Agrega productos del catálogo</p>
+              <p className="text-sm">Agrega productos o servicios</p>
             </div>
           ) : (
             cart.map(item => (
-              <div key={item.id} className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
-                <div className="flex-1 mr-2 overflow-hidden">
-                  <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{item.name}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {item.quantity} x ${item.unit_price.toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-bold text-sm text-slate-900 dark:text-white">
+              <div key={item.id} className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
+                <div className="flex justify-between items-start mb-2">
+                   <div className="flex items-center gap-2">
+                     {item.itemType === 'service' ? <Wrench size={14} className="text-blue-500" /> : <Package size={14} className="text-emerald-500" />}
+                     <p className="text-sm font-medium text-slate-900 dark:text-white truncate max-w-[130px]">{item.name}</p>
+                   </div>
+                   <p className="font-bold text-sm text-slate-900 dark:text-white">
                     ${(item.unit_price * item.quantity).toLocaleString()}
-                  </span>
-                  <button 
-                    onClick={() => removeFromCart(item.id)} 
-                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                   </p>
+                </div>
+
+                <div className="flex items-center justify-between">
+                   <div className="flex items-center gap-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1">
+                      <button onClick={() => handleUpdateQuantity(item.id, -1)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500"><Minus size={14} /></button>
+                      <span className="text-xs font-bold w-4 text-center text-slate-900 dark:text-white">{item.quantity}</span>
+                      <button onClick={() => handleUpdateQuantity(item.id, 1)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500"><Plus size={14} /></button>
+                   </div>
+                   <button onClick={() => removeFromCart(item.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))
           )}
         </div>
 
-        {/* Footer Totales */}
+        {/* Footer */}
         <div className="p-5 bg-slate-50 dark:bg-slate-800/80 rounded-b-2xl border-t border-slate-100 dark:border-slate-800 shrink-0">
           <div className="space-y-2 mb-4 text-sm">
-            {docType === 'factura' && (
-              <>
-                <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                  <span>Neto</span>
-                  <span>${calculateTotals().net.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-slate-500 dark:text-slate-400">
-                  <span>IVA (19%)</span>
-                  <span>${calculateTotals().tax.toLocaleString()}</span>
-                </div>
-                <div className="h-px bg-slate-200 dark:bg-slate-700 my-2" />
-              </>
-            )}
             <div className="flex justify-between text-xl font-extrabold text-slate-900 dark:text-white">
               <span>Total</span>
               <span>${calculateTotals().total.toLocaleString()}</span>
             </div>
           </div>
-          
           <button 
             onClick={handleCheckout}
             disabled={processing || cart.length === 0}
-            className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-[0.98]"
+            className={`w-full py-3.5 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-[0.98]
+              ${docType === 'cotizacion' 
+                ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20' 
+                : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'}`
+            }
           >
             {processing ? <Loader2 className="animate-spin" size={20} /> : <FileText size={20} />}
             {processing ? 'Generando...' : `Emitir ${docType.charAt(0).toUpperCase() + docType.slice(1)}`}
@@ -310,16 +407,7 @@ export default function NewSalePage() {
 
       </div>
 
-      {/* Modal Nuevo Cliente Rápido */}
-      {showClientForm && (
-        <ClientForm 
-          onClose={() => setShowClientForm(false)} 
-          onSuccess={() => {
-            setShowClientForm(false);
-            loadData(); // Recargar clientes
-          }} 
-        />
-      )}
+      {showClientForm && <ClientForm onClose={() => setShowClientForm(false)} onSuccess={() => { setShowClientForm(false); loadData(); }} />}
     </div>
   );
 }

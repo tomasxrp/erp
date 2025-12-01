@@ -5,9 +5,9 @@ import { Save, Building2, Loader2, MapPin, Mail, Phone, FileText, CheckCircle, B
 export default function ConfigPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false); // Estado para la subida
+  const [uploading, setUploading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const fileInputRef = useRef(null); // Referencia al input oculto
+  const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     company_name: '', rut: '', activity: '', address: '', email: '', phone: '', logo_url: ''
@@ -19,52 +19,64 @@ export default function ConfigPage() {
 
   async function loadSettings() {
     try {
-      const { data } = await supabase.from('company_settings').select('*').single();
+      // 1. Obtener usuario y su bodega para filtrar correctamente
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('warehouse_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.warehouse_id) return;
+
+      // 2. Buscar configuración DE MI BODEGA
+      const { data } = await supabase
+        .from('company_settings')
+        .select('*')
+        .eq('warehouse_id', profile.warehouse_id) // Filtro clave
+        .single();
+
       if (data) setFormData(data);
     } catch (e) {
-      // Primer carga sin datos
+      // Es normal fallar si no existe configuración aún
+      console.log("Aún no hay configuración guardada.");
     } finally {
       setLoading(false);
     }
   }
 
-  // Función para subir la imagen a Supabase Storage
   const handleImageUpload = async (event) => {
     try {
       const file = event.target.files[0];
       if (!file) return;
 
-      // Validar tamaño (Max 2MB)
       if (file.size > 2 * 1024 * 1024) {
         alert("La imagen es muy pesada. Máximo 2MB.");
         return;
       }
 
       setUploading(true);
-
-      // Crear nombre único: logo-timestamp.extensión
       const fileExt = file.name.split('.').pop();
       const fileName = `logo-${Date.now()}.${fileExt}`;
       const filePath = `${fileName}`;
 
-      // 1. Subir a Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('logos')
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
-      // 2. Obtener URL Pública
       const { data: { publicUrl } } = supabase.storage
         .from('logos')
         .getPublicUrl(filePath);
 
-      // 3. Actualizar estado local
       setFormData(prev => ({ ...prev, logo_url: publicUrl }));
 
     } catch (error) {
       console.error("Error subiendo imagen:", error);
-      alert("Error al subir la imagen. Asegúrate de haber ejecutado el script SQL de storage.");
+      alert("Error al subir imagen. Verifica que el bucket 'logos' exista y sea público.");
     } finally {
       setUploading(false);
     }
@@ -78,21 +90,43 @@ export default function ConfigPage() {
     e.preventDefault();
     setSaving(true);
     setShowSuccess(false);
+
     try {
-      const { data: existing } = await supabase.from('company_settings').select('id').single();
+      // 1. Obtener ID de Bodega del usuario actual
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('warehouse_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.warehouse_id) {
+        throw new Error("No tienes una bodega asignada.");
+      }
+
+      // 2. Verificar si ya existe configuración PARA ESTA BODEGA
+      const { data: existing } = await supabase
+        .from('company_settings')
+        .select('id')
+        .eq('warehouse_id', profile.warehouse_id)
+        .single();
       
-      // Aseguramos que guardamos la URL del logo también
+      const payload = {
+        ...formData,
+        warehouse_id: profile.warehouse_id // ✅ ASIGNACIÓN CRÍTICA
+      };
+
       if (existing) {
-        await supabase.from('company_settings').update(formData).eq('id', existing.id);
+        await supabase.from('company_settings').update(payload).eq('id', existing.id);
       } else {
-        await supabase.from('company_settings').insert([formData]);
+        await supabase.from('company_settings').insert([payload]);
       }
       
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error) {
       console.error(error);
-      alert("Error al guardar la configuración");
+      alert("Error al guardar: " + error.message);
     } finally {
       setSaving(false);
     }
@@ -109,7 +143,7 @@ export default function ConfigPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500">
       
-      {/* Header de la sección */}
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
@@ -129,7 +163,7 @@ export default function ConfigPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* COLUMNA IZQUIERDA: Formulario */}
+        {/* Formulario */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-bl-full pointer-events-none" />
@@ -243,14 +277,10 @@ export default function ConfigPage() {
           </div>
         </div>
 
-        {/* COLUMNA DERECHA: Logo y Preview */}
+        {/* Preview */}
         <div className="space-y-6">
-          
-          {/* Card de Logo */}
           <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 text-center">
             <h3 className="font-bold text-slate-900 dark:text-white mb-4">Logo Corporativo</h3>
-            
-            {/* Input oculto */}
             <input 
               type="file" 
               accept="image/*" 
@@ -258,8 +288,6 @@ export default function ConfigPage() {
               className="hidden" 
               onChange={handleImageUpload}
             />
-
-            {/* Área de Click */}
             <div 
               onClick={() => fileInputRef.current?.click()}
               className="w-40 h-40 mx-auto bg-slate-50 dark:bg-slate-800 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-500 hover:text-blue-500 transition-all group relative overflow-hidden"
@@ -267,11 +295,7 @@ export default function ConfigPage() {
               {uploading ? (
                 <Loader2 className="animate-spin" size={32} />
               ) : formData.logo_url ? (
-                <img 
-                  src={formData.logo_url} 
-                  alt="Logo" 
-                  className="w-full h-full object-contain p-4" 
-                />
+                <img src={formData.logo_url} alt="Logo" className="w-full h-full object-contain p-4" />
               ) : (
                 <>
                   <UploadCloud size={32} className="group-hover:scale-110 transition-transform" />
@@ -279,7 +303,6 @@ export default function ConfigPage() {
                 </>
               )}
             </div>
-
             {formData.logo_url && (
               <button 
                 onClick={handleRemoveLogo}
@@ -288,16 +311,13 @@ export default function ConfigPage() {
                 <Trash2 size={14} /> Eliminar Logo
               </button>
             )}
-            
             <p className="text-xs text-slate-400 mt-2">Formatos: PNG, JPG. Máx 2MB.</p>
           </div>
 
-          {/* Preview Documento */}
           <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
              <h3 className="font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                <FileText size={18} className="text-slate-400" /> Vista Previa
              </h3>
-             
              <div className="bg-white border border-slate-200 p-4 rounded-lg shadow-inner text-xs font-mono text-slate-600">
                 <div className="flex justify-between items-start mb-4">
                   <div className="w-16 h-16 bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 overflow-hidden">
@@ -325,3 +345,4 @@ export default function ConfigPage() {
     </div>
   );
 }
+

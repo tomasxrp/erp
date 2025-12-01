@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom';
-import { Users, Package, FileText, ShoppingCart, BarChart3, Box, Briefcase, X , Settings} from 'lucide-react';
+import { Users, Package, FileText, ShoppingCart, BarChart3, Box, Briefcase, X , Settings, Wrench} from 'lucide-react';
 
 const menuItems = [
   { path: '/inventario', label: 'Inventario', icon: Package },
   { path: '/ventas', label: 'Ventas', icon: ShoppingCart },
+  { path: '/servicios', label: 'Servicios', icon: Wrench },
   { path: '/crm', label: 'Clientes / CRM', icon: Briefcase },
   { path: '/cotizaciones', label: 'Cotizaciones', icon: FileText },
   { path: '/trabajadores', label: 'Trabajadores', icon: Users },
@@ -60,8 +61,16 @@ export default function Sidebar({ isOpen, onClose }) {
                 }`
               }
             >
-              <item.icon size={20} className={({isActive}) => isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-400"} />
-              <span>{item.label}</span>
+              {/* CORRECCIÓN AQUÍ: Usamos una función para acceder a isActive dentro de los hijos */}
+              {({ isActive }) => (
+                <>
+                  <item.icon 
+                    size={20} 
+                    className={isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-400"} 
+                  />
+                  <span>{item.label}</span>
+                </>
+              )}
             </NavLink>
           ))}
         </nav>

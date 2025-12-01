@@ -1,8 +1,30 @@
 import { supabase } from '../../../config/supabase';
 
+// Helper: Obtener warehouse_id del usuario actual
+async function getCurrentUserWarehouse() {
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user) {
+    throw new Error('Usuario no autenticado');
+  }
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('warehouse_id')
+    .eq('id', user.id)
+    .single();
+
+  if (error || !profile?.warehouse_id) {
+    throw new Error('No se pudo obtener la bodega del usuario');
+  }
+
+  return profile.warehouse_id;
+}
+
 export const inventoryService = {
-  // Obtener todos los productos
+  // Obtener todos los productos (SOLO DE MI BODEGA)
   async getProducts() {
+    // RLS automáticamente filtra por warehouse_id
     const { data, error } = await supabase
       .from('products')
       .select(`
@@ -23,7 +45,9 @@ export const inventoryService = {
     }));
   },
 
+  // Obtener bodegas (SOLO MI BODEGA)
   async getWarehouses() {
+    // RLS automáticamente filtra
     const { data, error } = await supabase
       .from('warehouses')
       .select('*')
@@ -34,9 +58,12 @@ export const inventoryService = {
     return data;
   },
 
-  // Crear Producto
+  // Crear Producto (ASIGNAR A MI BODEGA)
   async createProduct(productData) {
-    // 1. Insertar el producto base
+    // Obtener bodega del usuario
+    const warehouse_id = await getCurrentUserWarehouse();
+
+    // 1. Insertar el producto con warehouse_id del usuario
     const { data: product, error } = await supabase
       .from('products')
       .insert([{
@@ -48,40 +75,36 @@ export const inventoryService = {
         unit: productData.unit,
         category: productData.category,
         barcode: productData.barcode,
-        min_stock_alert: productData.min_stock_alert
+        min_stock_alert: productData.min_stock_alert,
+        warehouse_id: warehouse_id // ✅ Asignar bodega del usuario
       }])
       .select()
       .single();
 
     if (error) throw error;
 
-    // 2. Inicializar stock
-    const warehouses = await this.getWarehouses();
-    
-    // Identificar bodega principal para asignar el stock inicial ahí
-    const mainWarehouse = warehouses.find(w => w.is_main) || warehouses[0];
+    // 2. Inicializar stock en la bodega del usuario
+    const { error: stockError } = await supabase
+      .from('product_stocks')
+      .insert([{
+        product_id: product.id,
+        warehouse_id: warehouse_id,
+        quantity: productData.stock || 0,
+        min_limit: productData.min_stock_alert || 5
+      }]);
 
-    const initialStocks = warehouses.map(w => ({
-      product_id: product.id,
-      warehouse_id: w.id,
-      // Solo asignamos el stock inicial a la bodega principal, el resto en 0
-      quantity: (w.id === mainWarehouse?.id) ? (productData.stock || 0) : 0,
-      min_limit: productData.min_stock_alert || 5
-    }));
+    if (stockError) throw stockError;
 
-    if (initialStocks.length > 0) {
-      await supabase.from('product_stocks').insert(initialStocks);
-    }
+    console.log('✅ Producto creado en bodega:', warehouse_id);
 
     return product;
   },
 
   // Actualizar Producto
   async updateProduct(id, updates) {
-    // 1. Separamos el stock de los datos directos del producto
     const { stock, ...productFields } = updates;
 
-    // 2. Actualizamos la tabla 'products' (Nombre, Precio, SKU, etc.)
+    // 1. Actualizar datos del producto
     const { data, error } = await supabase
       .from('products')
       .update(productFields)
@@ -91,26 +114,22 @@ export const inventoryService = {
 
     if (error) throw error;
     
-    // 3. Actualizar Stock en Bodega Principal (CORRECCIÓN)
-    // Si el formulario envió un valor de stock, actualizamos la tabla 'product_stocks'
+    // 2. Actualizar Stock si se proporcionó
     if (stock !== undefined && stock !== null) {
-      const warehouses = await this.getWarehouses();
-      const mainWarehouse = warehouses.find(w => w.is_main) || warehouses[0];
+      const warehouse_id = await getCurrentUserWarehouse();
 
-      if (mainWarehouse) {
-        // Usamos upsert para crear o actualizar el registro de stock
-        const { error: stockError } = await supabase
-          .from('product_stocks')
-          .upsert({
-            product_id: id,
-            warehouse_id: mainWarehouse.id,
-            quantity: stock,
-            // Actualizamos también la alerta si cambió en el producto
-            min_limit: productFields.min_stock_alert || 5 
-          }, { onConflict: 'product_id, warehouse_id' });
+      const { error: stockError } = await supabase
+        .from('product_stocks')
+        .upsert({
+          product_id: id,
+          warehouse_id: warehouse_id,
+          quantity: stock,
+          min_limit: productFields.min_stock_alert || 5 
+        }, { 
+          onConflict: 'product_id,warehouse_id'
+        });
 
-        if (stockError) throw stockError;
-      }
+      if (stockError) throw stockError;
     }
 
     return data;

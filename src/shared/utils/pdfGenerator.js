@@ -3,54 +3,69 @@ import autoTable from 'jspdf-autotable';
 
 // Función auxiliar para convertir URL a Base64
 const getBase64FromUrl = async (url) => {
-  const data = await fetch(url);
-  const blob = await data.blob();
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(blob); 
-    reader.onloadend = () => resolve(reader.result);
-  });
+  try {
+    const data = await fetch(url);
+    const blob = await data.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(blob); 
+      reader.onloadend = () => resolve(reader.result);
+    });
+  } catch (e) {
+    console.warn("Error cargando imagen base64", e);
+    return null;
+  }
 };
 
-// Ahora la función es ASYNC para poder cargar la imagen
 export const generateDocumentPDF = async (sale, company, items) => {
   const doc = new jsPDF();
   
-  // Colores Corporativos
+  // --- CAMBIO AQUÍ: Color Unificado (Azul) ---
+  // Usamos siempre el azul corporativo, sin importar el tipo de documento
   const colorPrimary = [0, 160, 220]; // #00A0DC
+  
   const colorSecondary = [60, 60, 60]; 
   const colorLight = [245, 245, 245]; 
 
+  // --- CONFIGURACIÓN TÍTULO Y NÚMERO ---
   let title = 'DOCUMENTO';
-  if (sale.type === 'factura') title = 'FACTURA ELECTRÓNICA';
-  else if (sale.type === 'boleta') title = 'BOLETA ELECTRÓNICA';
-  else if (sale.type === 'cotizacion') title = 'COTIZACIÓN';
+  let documentNumber = sale.receipt_number || '00000';
+
+  if (sale.type === 'factura') {
+    title = 'FACTURA ELECTRÓNICA';
+  } else if (sale.type === 'boleta') {
+    title = 'BOLETA ELECTRÓNICA';
+  } else if (sale.type === 'cotizacion') {
+    title = 'COTIZACIÓN';
+    // Mantenemos la lógica del número manual
+    if (sale.quote_number_manual && sale.quote_number_manual.trim() !== '') {
+      documentNumber = sale.quote_number_manual;
+    }
+  }
 
   // --- 1. CABECERA ---
-  
-  // LOGO: Intentamos cargarlo
   if (company.logo_url) {
     try {
       const imgData = await getBase64FromUrl(company.logo_url);
-      // Añadimos la imagen (data, formato, x, y, ancho, alto)
-      doc.addImage(imgData, 'PNG', 14, 10, 30, 30); 
+      if (imgData) {
+        doc.addImage(imgData, 'PNG', 14, 10, 30, 30); 
+      }
     } catch (e) {
       console.warn("No se pudo cargar el logo para el PDF", e);
     }
   }
 
-  // Ajustamos la posición Y del texto si hay logo
   const headerTextY = 20; 
-
   doc.setDrawColor(colorPrimary[0], colorPrimary[1], colorPrimary[2]);
   doc.setLineWidth(1.5);
   doc.line(10, 15, 10, 45);
 
+  // DATOS EMPRESA
   doc.setFontSize(18);
   doc.setTextColor(colorSecondary[0], colorSecondary[1], colorSecondary[2]);
   doc.setFont("helvetica", "bold");
-  // Movemos un poco a la derecha si hay logo, o lo dejamos en 50 si queremos que no se solape
   const textX = company.logo_url ? 50 : 14; 
+  
   doc.text((company.company_name || 'MI EMPRESA').toUpperCase(), textX, 20);
   
   doc.setFontSize(9);
@@ -61,7 +76,6 @@ export const generateDocumentPDF = async (sale, company, items) => {
   doc.text(`Tel: ${company.phone || '-'} | ${company.email || ''}`, textX, 36);
   doc.text(company.activity || 'Giro Comercial', textX, 41);
 
-  // ... (El resto del código del PDF se mantiene igual que la versión anterior)
   // Recuadro Derecho
   const rightColX = 140;
   doc.setFillColor(colorLight[0], colorLight[1], colorLight[2]);
@@ -79,11 +93,11 @@ export const generateDocumentPDF = async (sale, company, items) => {
   
   doc.setTextColor(0);
   doc.setFontSize(10);
-  doc.text(`Nº ${sale.receipt_number || '00001'}`, rightColX + 30, 34, { align: 'center' });
+  doc.text(`Nº ${documentNumber}`, rightColX + 30, 34, { align: 'center' });
   
   doc.setFontSize(9);
   doc.setTextColor(100);
-  doc.text(`FECHA: ${new Date(sale.created_at).toLocaleDateString('es-CL')}`, rightColX + 30, 41, { align: 'center' });
+  doc.text(`FECHA: ${new Date().toLocaleDateString('es-CL')}`, rightColX + 30, 41, { align: 'center' });
 
   // Datos Cliente
   const client = sale.client_snapshot || {};
@@ -94,7 +108,7 @@ export const generateDocumentPDF = async (sale, company, items) => {
   doc.setFontSize(10);
   doc.setTextColor(colorPrimary[0], colorPrimary[1], colorPrimary[2]);
   doc.setFont("helvetica", "bold");
-  doc.text("FACTURAR A:", 18, clientY + 2);
+  doc.text(sale.type === 'cotizacion' ? "COTIZAR A:" : "FACTURAR A:", 18, clientY + 2);
   
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
@@ -107,7 +121,7 @@ export const generateDocumentPDF = async (sale, company, items) => {
   doc.text(`Dirección: ${client.address || 'Ciudad, País'}`, 100, clientY + 8);
   if (client.phone) doc.text(`Tel: ${client.phone}`, 100, clientY + 14);
 
-  // Tabla
+  // Tabla Items
   const tableRows = items.map(item => {
     const precioBrutoUnitario = item.unit_price;
     const precioNetoUnitario = Math.round(precioBrutoUnitario / 1.19);
@@ -146,17 +160,22 @@ export const generateDocumentPDF = async (sale, company, items) => {
   doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(colorPrimary[0], colorPrimary[1], colorPrimary[2]);
-  doc.text("Términos y Instrucciones:", 14, finalY);
+  doc.text(sale.type === 'cotizacion' ? "Condiciones de la Cotización:" : "Términos y Instrucciones:", 14, finalY);
+  
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(80);
-  doc.text(["Forma de pago: Contado / Transferencia.", "Garantía según boleta.", "Gracias por su preferencia."], 14, finalY + 6);
+  
+  if (sale.type === 'cotizacion') {
+      doc.text(["Validez de la oferta: 15 días.", "Forma de pago: Contado / Transferencia.", "Stock sujeto a disponibilidad."], 14, finalY + 6);
+  } else {
+      doc.text(["Forma de pago: Contado / Transferencia.", "Garantía según boleta.", "Gracias por su preferencia."], 14, finalY + 6);
+  }
 
   const totalsData = [
     ['SUBTOTAL NETO', `$ ${sale.net_amount?.toLocaleString('es-CL')}`],
-    ['DESCUENTO', '$ 0'],
     ['IVA (19%)', `$ ${sale.tax_amount?.toLocaleString('es-CL')}`],
-    ['TOTAL A PAGAR', `$ ${sale.total_amount?.toLocaleString('es-CL')}`]
+    ['TOTAL', `$ ${sale.total_amount?.toLocaleString('es-CL')}`]
   ];
 
   autoTable(doc, {
@@ -167,11 +186,11 @@ export const generateDocumentPDF = async (sale, company, items) => {
     columnStyles: { 0: { fontStyle: 'bold', textColor: [80, 80, 80] }, 1: { halign: 'right', cellWidth: 35 } },
     margin: { left: 110 }, 
     didParseCell: (data) => {
-      if (data.row.index === 3) {
+      if (data.row.index === 2) { 
         data.cell.styles.fontSize = 14;
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.textColor = colorPrimary;
-        data.cell.styles.fillColor = [240, 248, 255];
+        data.cell.styles.fillColor = [255, 255, 255]; 
       }
     }
   });
@@ -183,8 +202,10 @@ export const generateDocumentPDF = async (sale, company, items) => {
   doc.setFontSize(8);
   doc.setFont("helvetica", "italic");
   doc.setTextColor(150);
-  doc.text("Documento generado electrónicamente", 105, pageHeight - 15, { align: 'center' });
+  
+  const footerText = sale.type === 'cotizacion' ? "Cotización válida por 15 días" : "Documento generado electrónicamente";
+  doc.text(footerText, 105, pageHeight - 15, { align: 'center' });
   doc.text(`${company.company_name} - ${company.email}`, 105, pageHeight - 10, { align: 'center' });
 
-  doc.save(`${sale.type}_${sale.receipt_number || Date.now()}.pdf`);
+  doc.save(`${sale.type}_${documentNumber}.pdf`);
 };
