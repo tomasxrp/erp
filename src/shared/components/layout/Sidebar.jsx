@@ -6,7 +6,7 @@ const menuItems = [
   { path: '/ventas', label: 'Ventas', icon: ShoppingCart },
   { path: '/servicios', label: 'Servicios', icon: Wrench },
   { path: '/crm', label: 'Clientes / CRM', icon: Briefcase },
-  { path: '/cotizaciones', label: 'Cotizaciones', icon: FileText },
+  { path: '/registros', label: 'Historial / Registros', icon: FileText },,
   { path: '/trabajadores', label: 'Trabajadores', icon: Users },
   { path: '/reportes', label: 'Reportes', icon: BarChart3 },
   { path: '/configuracion', label: 'Configuración', icon: Settings }

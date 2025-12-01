@@ -101,14 +101,12 @@ export default function NewSalePage() {
 
   const calculateTotals = () => {
     const total = cart.reduce((acc, item) => acc + (item.unit_price * item.quantity), 0);
-    let net = total;
-    let tax = 0;
-
-    if (docType === 'factura') {
-      net = Math.round(total / 1.19);
-      tax = total - net;
-    }
     
+    // Asumimos que los precios en el sistema son IVA incluido (Brutos)
+    const net = Math.round(total / 1.19);
+    const tax = total - net;
+    
+    // Ya no usamos el 'if (docType === factura)', calculamos para todos.
     return { net, tax, total };
   };
 

@@ -11,13 +11,13 @@ import RegisterPage from '../modules/auth/pages/RegisterPage';
 // Páginas Módulos
 import TrabajadoresPage from '../modules/trabajadores/pages/TrabajadoresPage';
 import InventarioPage from '../modules/inventario/pages/InventarioPage';
-import CotizacionesPage from '../modules/cotizaciones/pages/CotizacionesPage';
 import VentasPage from '../modules/ventas/pages/VentasPage';
 import ReportesPage from '../modules/reportes/pages/ReportesPage';
 import ClientsPage from '../modules/crm/pages/ClientsPage';
 import NewSalePage from '../modules/ventas/pages/NewSalePage';
 import ConfigPage from '../modules/configuracion/pages/ConfigPage';
 import ServicesPage from '../modules/servicios/pages/ServicesPage';
+import RegistrosPage from '../modules/registros/pages/RegistrosPage';
 
 export default function AppRoutes() {
   return (
@@ -44,7 +44,7 @@ export default function AppRoutes() {
           <Route path="trabajadores/*" element={<TrabajadoresPage />} />
           <Route path="inventario/*" element={<InventarioPage />} />
           <Route path="servicios" element={<ServicesPage />} /> 
-          <Route path="cotizaciones/*" element={<CotizacionesPage />} />
+          <Route path="registros" element={<RegistrosPage />} />
           <Route path="ventas" element={<NewSalePage />} />
           <Route path="reportes/*" element={<ReportesPage />} />
           <Route path="crm" element={<ClientsPage />} />
