@@ -7,31 +7,61 @@ const AuthContext = createContext({});
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null); // Nuevo: Guardamos el perfil con roles
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   useEffect(() => {
-    // 1. Verificar sesión actual al cargar
+    // 1. Verificar sesión al cargar
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      setLoading(false);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setLoading(false);
+      }
     });
 
-    // 2. Escuchar cambios (Login, Logout, Auto-refresh token)
+    // 2. Escuchar cambios (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      setLoading(false);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
+  // Función auxiliar para traer el perfil y sus roles desde la DB
+  const fetchProfile = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (data) {
+        setProfile(data);
+      }
+    } catch (error) {
+      console.error("Error cargando perfil:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const value = {
     session,
     user,
+    profile, // Exportamos el perfil para usarlo en el resto de la app
     signOut: () => supabase.auth.signOut(),
+    loading
   };
 
   return (
@@ -41,7 +71,6 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-// Hook personalizado para usar el contexto fácilmente
 export const useAuth = () => {
   return useContext(AuthContext);
 };

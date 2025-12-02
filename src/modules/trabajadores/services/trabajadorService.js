@@ -1,8 +1,27 @@
 import { supabase } from '../../../config/supabase';
 
+// Helper para obtener bodega del admin actual
+async function getMyWarehouseId() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('No autenticado');
+
+  const { data } = await supabase
+    .from('profiles')
+    .select('warehouse_id')
+    .eq('id', user.id)
+    .single();
+    
+  return data?.warehouse_id;
+}
+
+
+
+
+
 export const trabajadorService = {
-  // Obtener lista de trabajadores
+  // Obtener lista de trabajadores (Solo de mi bodega)
   async getTrabajadores() {
+    // Gracias al RLS y get_my_warehouse_id(), esto ya filtra solo tus empleados
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -11,100 +30,49 @@ export const trabajadorService = {
     if (error) throw error;
     return data;
   },
-
-  // ⚠️ IMPORTANTE: Este método SOLO funciona con la Admin API (Service Role Key)
-  // NO puedes crear usuarios desde el frontend sin que se cierre la sesión actual
-  // 
-  // OPCIONES:
-  // 1. Crear un Edge Function en Supabase (Recomendado)
-  // 2. Usar un backend intermedio
-  // 3. Aceptar que el admin se desloguee temporalmente
-  //
-  // Por ahora, dejamos el método original con ADVERTENCIA clara al usuario
-  async createTrabajador(userData) {
-    // Este método va a cerrar la sesión del usuario actual
-    // porque signUp() automáticamente loguea al nuevo usuario
-    
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: userData.email,
-      password: userData.password,
-      options: {
-        data: {
-          full_name: userData.full_name,
-        },
-      },
-    });
-
-    if (authError) throw authError;
-
-    // Actualizar datos adicionales
-    if (authData.user) {
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          role: userData.role,
-          phone: userData.phone
-        })
-        .eq('id', authData.user.id);
-
-      if (profileError) {
-        console.error("Error actualizando perfil:", profileError);
-      }
-    }
-
-    return authData;
-  },
-
-  async updateTrabajador(id, updates) {
+  
+  async updateWorkerRoles(id, newRolesArray) {
     const { data, error } = await supabase
       .from('profiles')
-      .update(updates)
+      .update({ role: newRolesArray }) // Enviamos el array ej: ['admin', 'vendedor']
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
     return data;
+  },
+
+  // Crear Trabajador (CON HERENCIA DE BODEGA)
+  async createTrabajador(userData) {
+    // 1. Obtener mi ID de bodega para pasárselo al nuevo empleado
+    const myWarehouseId = await getMyWarehouseId();
+    if (!myWarehouseId) throw new Error("No se pudo identificar tu bodega.");
+
+    // 2. Registrar usuario pasando el warehouse_id en los metadatos
+    // IMPORTANTE: Esto cerrará la sesión actual del administrador en el navegador
+    const { data, error } = await supabase.auth.signUp({
+      email: userData.email,
+      password: userData.password,
+      options: {
+        data: {
+          full_name: userData.full_name,
+          role: userData.role || 'vendedor',
+          warehouse_id: myWarehouseId // <--- ESTO ACTIVA LA HERENCIA EN SQL
+        },
+      },
+    });
+
+    if (error) throw error;
+    return data;
+  },
+
+  // Eliminar trabajador (Opcional, pero útil)
+  async deleteTrabajador(id) {
+    // Nota: Supabase Auth no permite borrar usuarios desde el cliente fácilmente.
+    // Esto solo borraría el perfil, pero el usuario Auth seguiría existiendo.
+    // Para borrar completamente se requiere una Edge Function (Backend).
+    const { error } = await supabase.from('profiles').delete().eq('id', id);
+    if (error) throw error;
   }
 };
-
-// ==========================================
-// SOLUCIÓN ALTERNATIVA: Edge Function
-// ==========================================
-// Crea un Edge Function en Supabase para crear usuarios sin afectar la sesión
-// 
-// Pasos:
-// 1. Ve a Edge Functions en tu Dashboard de Supabase
-// 2. Crea una función llamada "create-user"
-// 3. Usa este código:
-//
-// import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-// import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-//
-// serve(async (req) => {
-//   const supabaseAdmin = createClient(
-//     Deno.env.get('SUPABASE_URL') ?? '',
-//     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-//   )
-//
-//   const { email, password, full_name, role, phone } = await req.json()
-//
-//   const { data, error } = await supabaseAdmin.auth.admin.createUser({
-//     email,
-//     password,
-//     email_confirm: true,
-//     user_metadata: { full_name }
-//   })
-//
-//   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 400 })
-//
-//   // Actualizar perfil
-//   await supabaseAdmin.from('profiles').update({ role, phone }).eq('id', data.user.id)
-//
-//   return new Response(JSON.stringify({ user: data.user }), { status: 200 })
-// })
-//
-// Luego, en tu frontend:
-// const { data } = await supabase.functions.invoke('create-user', {
-//   body: { email, password, full_name, role, phone }
-// })

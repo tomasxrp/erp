@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { Search, Plus, Trash2, ShoppingCart, UserPlus, FileText, Loader2, Minus, Package, Wrench } from 'lucide-react';
 import { supabase } from '../../../config/supabase';
 import { inventoryService } from '../../inventario/services/inventoryService';
-import { servicesService } from '../../servicios/services/servicesService'; // <--- IMPORTANTE
+import { servicesService } from '../../servicios/services/servicesService';
 import { crmService } from '../../crm/services/crmService';
 import { generateDocumentPDF } from '../../../shared/utils/pdfGenerator';
 import ClientForm from '../../crm/components/ClientForm';
+import Toast from '../../../shared/components/ui/Toast';
 
 export default function NewSalePage() {
   // Estados de Datos
@@ -24,6 +25,12 @@ export default function NewSalePage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [showClientForm, setShowClientForm] = useState(false);
+  const [toast, setToast] = useState({ message: '', type: '' });
+
+  // Función Helper para notificaciones
+  const showToast = (msg, type = 'error') => {
+    setToast({ message: msg, type });
+  };
 
   useEffect(() => {
     loadData();
@@ -47,9 +54,9 @@ export default function NewSalePage() {
         supabase.from('company_settings').select('*').eq('warehouse_id', profile.warehouse_id).single()
       ]);
       
-      // Unificamos la lista añadiendo un campo "type"
+      // Unificamos la lista añadiendo un campo "itemType" para diferenciar
       const taggedProducts = (prods || []).map(p => ({ ...p, itemType: 'product' }));
-      const taggedServices = (servs || []).map(s => ({ ...s, itemType: 'service', total_stock: Infinity })); // Servicios tienen stock infinito
+      const taggedServices = (servs || []).map(s => ({ ...s, itemType: 'service', total_stock: Infinity })); // Servicios tienen stock infinito lógico
       
       setAllItems([...taggedProducts, ...taggedServices]);
       setClients(cli || []);
@@ -57,6 +64,7 @@ export default function NewSalePage() {
 
     } catch (e) { 
       console.error("Error cargando datos:", e); 
+      showToast("Error al cargar datos del sistema", 'error');
     } finally { 
       setLoading(false); 
     }
@@ -68,9 +76,9 @@ export default function NewSalePage() {
     if (existing) {
       handleUpdateQuantity(item.id, 1);
     } else {
-      // Validación de Stock inicial (Solo para productos)
+      // Validación de Stock inicial (Solo para productos y si no es cotización)
       if (item.itemType === 'product' && docType !== 'cotizacion' && item.total_stock < 1) {
-        return alert("Sin stock disponible");
+        return showToast("Sin stock disponible para este producto", 'error');
       }
       setCart([...cart, { ...item, quantity: 1, unit_price: item.price }]);
     }
@@ -84,7 +92,7 @@ export default function NewSalePage() {
         
         // 1. Validar Stock Máximo (Solo si es Producto y NO es cotización)
         if (delta > 0 && item.itemType === 'product' && docType !== 'cotizacion' && newQuantity > item.total_stock) {
-          alert(`Solo quedan ${item.total_stock} unidades disponibles.`);
+          showToast(`Stock insuficiente. Solo quedan ${item.total_stock} unidades.`, 'error');
           return item;
         }
 
@@ -99,21 +107,21 @@ export default function NewSalePage() {
 
   const removeFromCart = (id) => setCart(cart.filter(item => item.id !== id));
 
+  // Cálculo de Totales (Siempre calculamos IVA)
   const calculateTotals = () => {
     const total = cart.reduce((acc, item) => acc + (item.unit_price * item.quantity), 0);
     
-    // Asumimos que los precios en el sistema son IVA incluido (Brutos)
+    // Asumimos precios brutos (IVA incluido)
     const net = Math.round(total / 1.19);
     const tax = total - net;
     
-    // Ya no usamos el 'if (docType === factura)', calculamos para todos.
     return { net, tax, total };
   };
 
   const handleCheckout = async () => {
-    if (cart.length === 0) return alert("El carrito está vacío");
+    if (cart.length === 0) return showToast("El carrito está vacío", 'info');
     if (!selectedClient && (docType === 'factura' || docType === 'cotizacion')) {
-        return alert("Debes seleccionar un cliente para este documento.");
+        return showToast("Debes seleccionar un cliente para este documento.", 'error');
     }
     
     setProcessing(true);
@@ -146,8 +154,8 @@ export default function NewSalePage() {
       // 2. Guardar Items (Mapeando product_id O service_id)
       const saleItemsToInsert = cart.map(item => ({
         sale_id: sale.id,
-        product_id: item.itemType === 'product' ? item.id : null, // ID si es producto
-        service_id: item.itemType === 'service' ? item.id : null, // ID si es servicio
+        product_id: item.itemType === 'product' ? item.id : null, 
+        service_id: item.itemType === 'service' ? item.id : null,
         product_name: item.name,
         quantity: item.quantity,
         unit_price: item.unit_price
@@ -159,7 +167,7 @@ export default function NewSalePage() {
       // 3. Descontar Stock (SOLO PRODUCTOS y si NO es cotización)
       if (docType !== 'cotizacion') {
         for (const item of cart) {
-          if (item.itemType === 'product') { // Solo descontamos productos
+          if (item.itemType === 'product') { 
             try {
               await supabase.rpc('decrement_stock', {
                 p_product_id: item.id,
@@ -177,16 +185,16 @@ export default function NewSalePage() {
       const saleForPdf = { ...sale, quote_number_manual: quoteNumber };
       await generateDocumentPDF(saleForPdf, companySettings, saleItemsToInsert);
 
-      alert(`¡${docType.charAt(0).toUpperCase() + docType.slice(1)} generada correctamente!`);
+      showToast(`¡${docType.charAt(0).toUpperCase() + docType.slice(1)} generada correctamente!`, 'success');
       
       setCart([]);
       setSelectedClient(null);
       setQuoteNumber('');
-      await loadData(); 
+      await loadData(); // Recargar para actualizar stock visualmente
 
     } catch (e) {
       console.error('Error en venta:', e);
-      alert("Error al procesar: " + e.message);
+      showToast("Error al procesar: " + e.message, 'error');
     } finally {
       setProcessing(false);
     }
@@ -195,7 +203,8 @@ export default function NewSalePage() {
   // Filtrado Unificado
   const filteredItems = allItems.filter(item => 
     item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase()))
+    (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   if (loading) return (
@@ -205,8 +214,11 @@ export default function NewSalePage() {
   );
 
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-100px)] gap-6">
+    <div className="flex flex-col lg:flex-row h-[calc(100vh-100px)] gap-6 relative">
       
+      {/* Sistema de Notificaciones */}
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: '' })} />
+
       {/* IZQUIERDA: Catálogo Unificado */}
       <div className="flex-1 flex flex-col gap-4 min-h-0">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 flex gap-4 shrink-0">
@@ -232,7 +244,7 @@ export default function NewSalePage() {
                     : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-400'
                   }`}
               >
-                {/* Icono de Fondo */}
+                {/* Icono de Fondo Decorativo */}
                 <div className="absolute -right-4 -bottom-4 opacity-5 pointer-events-none">
                    {item.itemType === 'service' 
                      ? <Wrench size={100} className="text-blue-600" /> 
@@ -283,7 +295,7 @@ export default function NewSalePage() {
         </div>
       </div>
 
-      {/* DERECHA: Carrito (Igual que antes pero ahora soporta servicios) */}
+      {/* DERECHA: Carrito de Compras */}
       <div className="w-full lg:w-96 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 flex flex-col shrink-0 lg:h-full h-auto">
         
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 rounded-t-2xl shrink-0">
@@ -330,10 +342,10 @@ export default function NewSalePage() {
             </select>
           </div>
 
-          {/* Input Cotización */}
+          {/* Input Cotización Manual */}
           {docType === 'cotizacion' && (
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-              <label className="text-xs font-bold uppercase text-slate-500">N° Cotización</label>
+              <label className="text-xs font-bold uppercase text-slate-500">N° Cotización (Opcional)</label>
               <div className="relative mt-1">
                  <FileText className="absolute left-3 top-2.5 text-slate-400" size={16} />
                  <input
@@ -357,7 +369,7 @@ export default function NewSalePage() {
             </div>
           ) : (
             cart.map(item => (
-              <div key={item.id} className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
+              <div key={item.id} className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-700 animate-in fade-in zoom-in-95 duration-200">
                 <div className="flex justify-between items-start mb-2">
                    <div className="flex items-center gap-2">
                      {item.itemType === 'service' ? <Wrench size={14} className="text-blue-500" /> : <Package size={14} className="text-emerald-500" />}
@@ -370,9 +382,9 @@ export default function NewSalePage() {
 
                 <div className="flex items-center justify-between">
                    <div className="flex items-center gap-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1">
-                      <button onClick={() => handleUpdateQuantity(item.id, -1)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500"><Minus size={14} /></button>
+                      <button onClick={() => handleUpdateQuantity(item.id, -1)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 transition-colors"><Minus size={14} /></button>
                       <span className="text-xs font-bold w-4 text-center text-slate-900 dark:text-white">{item.quantity}</span>
-                      <button onClick={() => handleUpdateQuantity(item.id, 1)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500"><Plus size={14} /></button>
+                      <button onClick={() => handleUpdateQuantity(item.id, 1)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 transition-colors"><Plus size={14} /></button>
                    </div>
                    <button onClick={() => removeFromCart(item.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"><Trash2 size={16} /></button>
                 </div>
@@ -381,7 +393,7 @@ export default function NewSalePage() {
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer Totales y Botón */}
         <div className="p-5 bg-slate-50 dark:bg-slate-800/80 rounded-b-2xl border-t border-slate-100 dark:border-slate-800 shrink-0">
           <div className="space-y-2 mb-4 text-sm">
             <div className="flex justify-between text-xl font-extrabold text-slate-900 dark:text-white">
@@ -405,7 +417,12 @@ export default function NewSalePage() {
 
       </div>
 
-      {showClientForm && <ClientForm onClose={() => setShowClientForm(false)} onSuccess={() => { setShowClientForm(false); loadData(); }} />}
+      {showClientForm && (
+        <ClientForm 
+          onClose={() => setShowClientForm(false)} 
+          onSuccess={() => { setShowClientForm(false); loadData(); }} 
+        />
+      )}
     </div>
   );
 }

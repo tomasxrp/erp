@@ -22,9 +22,8 @@ async function getCurrentUserWarehouse() {
 }
 
 export const inventoryService = {
-  // Obtener todos los productos (SOLO DE MI BODEGA)
+  // Obtener productos (SOLO ACTIVOS)
   async getProducts() {
-    // RLS automáticamente filtra por warehouse_id
     const { data, error } = await supabase
       .from('products')
       .select(`
@@ -35,6 +34,7 @@ export const inventoryService = {
           warehouses (name)
         )
       `)
+      .eq('active', true) // <--- CAMBIO CLAVE: Solo traer los no eliminados
       .order('name');
 
     if (error) throw error;
@@ -45,9 +45,8 @@ export const inventoryService = {
     }));
   },
 
-  // Obtener bodegas (SOLO MI BODEGA)
+  // Obtener bodegas
   async getWarehouses() {
-    // RLS automáticamente filtra
     const { data, error } = await supabase
       .from('warehouses')
       .select('*')
@@ -58,12 +57,10 @@ export const inventoryService = {
     return data;
   },
 
-  // Crear Producto (ASIGNAR A MI BODEGA)
+  // Crear Producto
   async createProduct(productData) {
-    // Obtener bodega del usuario
     const warehouse_id = await getCurrentUserWarehouse();
 
-    // 1. Insertar el producto con warehouse_id del usuario
     const { data: product, error } = await supabase
       .from('products')
       .insert([{
@@ -76,14 +73,15 @@ export const inventoryService = {
         category: productData.category,
         barcode: productData.barcode,
         min_stock_alert: productData.min_stock_alert,
-        warehouse_id: warehouse_id // ✅ Asignar bodega del usuario
+        warehouse_id: warehouse_id,
+        active: true // Aseguramos que nazca activo
       }])
       .select()
       .single();
 
     if (error) throw error;
 
-    // 2. Inicializar stock en la bodega del usuario
+    // Inicializar stock
     const { error: stockError } = await supabase
       .from('product_stocks')
       .insert([{
@@ -95,8 +93,6 @@ export const inventoryService = {
 
     if (stockError) throw stockError;
 
-    console.log('✅ Producto creado en bodega:', warehouse_id);
-
     return product;
   },
 
@@ -104,7 +100,6 @@ export const inventoryService = {
   async updateProduct(id, updates) {
     const { stock, ...productFields } = updates;
 
-    // 1. Actualizar datos del producto
     const { data, error } = await supabase
       .from('products')
       .update(productFields)
@@ -114,7 +109,6 @@ export const inventoryService = {
 
     if (error) throw error;
     
-    // 2. Actualizar Stock si se proporcionó
     if (stock !== undefined && stock !== null) {
       const warehouse_id = await getCurrentUserWarehouse();
 
@@ -135,11 +129,12 @@ export const inventoryService = {
     return data;
   },
 
-  // Eliminar Producto
+  // Eliminar Producto (AHORA ES SOFT DELETE)
   async deleteProduct(id) {
+    // En lugar de .delete(), hacemos .update()
     const { error } = await supabase
       .from('products')
-      .delete()
+      .update({ active: false }) // <--- CAMBIO CLAVE: "Apagar" el producto
       .eq('id', id);
 
     if (error) throw error;

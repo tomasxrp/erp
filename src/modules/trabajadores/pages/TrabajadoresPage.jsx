@@ -1,39 +1,53 @@
 import { useState } from 'react';
-import { UserPlus, Mail, Phone, Loader2, Shield, User, LogOut } from 'lucide-react'; // Agregué LogOut
+import { UserPlus, Mail, Phone, Loader2, Shield, User, Settings } from 'lucide-react';
 import { useTrabajadores } from '../hooks/useTrabajadores';
 import TrabajadorForm from '../components/TrabajadorForm';
+import RoleManagerModal from '../components/RoleManagerModal'; // <--- IMPORTAR
 import { trabajadorService } from '../services/trabajadorService';
+import { useAuth } from '../../../store/AuthContext'; // Para saber si SOY admin
 
 export default function TrabajadoresPage() {
   const { trabajadores, loading, error, refetch } = useTrabajadores();
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const { user } = useAuth(); // Usuario logueado
+  
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [roleModalWorker, setRoleModalWorker] = useState(null); // Trabajador seleccionado para editar
   const [saving, setSaving] = useState(false);
 
+  // Crear Usuario
   const handleCreateUser = async (formData) => {
-    // Advertencia de UX
     const confirmacion = window.confirm(
-      "ATENCIÓN: Al crear un nuevo usuario desde aquí, tu sesión actual se cerrará y entrarás automáticamente como el nuevo usuario.\n\n¿Deseas continuar?"
+      "ATENCIÓN: Al crear un nuevo usuario, tu sesión se cerrará.\n¿Deseas continuar?"
     );
-
     if (!confirmacion) return;
 
     setSaving(true);
     try {
       await trabajadorService.createTrabajador(formData);
-      setIsModalOpen(false);
-      
-      // No necesitamos refetch, porque la página se recargará o cambiará de contexto
-      // al cambiar el usuario autenticado.
+      setIsFormOpen(false);
       window.location.reload(); 
-      
     } catch (err) {
-      alert("Error al crear usuario: " + err.message);
+      alert("Error: " + err.message);
       setSaving(false);
     }
   };
 
-  if (loading) return <div className="flex h-96 items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-blue-600 dark:text-blue-400" /></div>;
-  if (error) return <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg">{error}</div>;
+  // Guardar Roles (Admin Panel)
+  const handleUpdateRoles = async (id, newRoles) => {
+    try {
+      await trabajadorService.updateWorkerRoles(id, newRoles);
+      await refetch(); // Recargar lista para ver cambios
+    } catch (err) {
+      alert("Error al actualizar roles: " + err.message);
+    }
+  };
+
+  // Helper para verificar si SOY admin (buscamos mi perfil en la lista cargada)
+  const myProfile = trabajadores.find(t => t.id === user?.id);
+  const isAdmin = myProfile?.role?.includes('admin');
+
+  if (loading) return <div className="flex h-96 items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
+  if (error) return <div className="p-4 bg-red-50 text-red-600 rounded-lg">{error}</div>;
 
   return (
     <div className="space-y-6 relative">
@@ -41,60 +55,79 @@ export default function TrabajadoresPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Equipo de Trabajo</h1>
           <p className="text-slate-500 dark:text-slate-400">
-            {trabajadores.length} {trabajadores.length === 1 ? 'usuario registrado' : 'usuarios registrados'}
+            {trabajadores.length} usuarios activos
           </p>
         </div>
         
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-lg shadow-indigo-600/30 transition-all"
-        >
-          <UserPlus size={18} /> Agregar Usuario
-        </button>
+        {isAdmin && (
+          <button 
+            onClick={() => setIsFormOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-lg shadow-indigo-600/30 transition-all"
+          >
+            <UserPlus size={18} /> Agregar Usuario
+          </button>
+        )}
       </div>
 
-      {isModalOpen && (
+      {isFormOpen && (
         <TrabajadorForm 
-          onClose={() => setIsModalOpen(false)} 
+          onClose={() => setIsFormOpen(false)} 
           onSubmit={handleCreateUser}
           loading={saving}
         />
       )}
 
-      {trabajadores.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
-          <div className="mx-auto h-16 w-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-            <User className="h-8 w-8 text-slate-400" />
-          </div>
-          <h3 className="text-lg font-medium text-slate-900 dark:text-white">No hay trabajadores aún</h3>
-          <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-2">
-            Agrega nuevos usuarios con el botón superior.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {trabajadores.map((worker) => (
-            <div key={worker.id} className="group bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-900 transition-all">
-              <div className="flex items-start justify-between">
-                <div className="flex gap-4">
-                  <img 
-                    src={`https://ui-avatars.com/api/?name=${worker.full_name}&background=random&color=fff`} 
-                    alt={worker.full_name}
-                    className="h-14 w-14 rounded-full ring-4 ring-slate-50 dark:ring-slate-800"
-                  />
-                  <div>
-                    <h3 className="font-bold text-slate-900 dark:text-white text-lg">{worker.full_name}</h3>
-                    <div className="flex items-center gap-1 mt-1">
-                      <Shield size={14} className="text-indigo-500" />
-                      <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium capitalize">
-                        {worker.role}
-                      </p>
-                    </div>
+      {/* Modal de Roles */}
+      {roleModalWorker && (
+        <RoleManagerModal 
+          worker={roleModalWorker}
+          onClose={() => setRoleModalWorker(null)}
+          onSave={handleUpdateRoles}
+        />
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {trabajadores.map((worker) => {
+          // Normalizamos roles a array por seguridad
+          const roles = Array.isArray(worker.role) ? worker.role : [worker.role];
+          
+          return (
+            <div key={worker.id} className="group bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-all relative">
+              
+              {/* Botón Admin Panel (Solo visible si soy admin) */}
+              {isAdmin && (
+                <button 
+                  onClick={() => setRoleModalWorker(worker)}
+                  className="absolute top-4 right-4 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                  title="Gestionar Roles"
+                >
+                  <Settings size={18} />
+                </button>
+              )}
+
+              <div className="flex items-start gap-4">
+                <img 
+                  src={`https://ui-avatars.com/api/?name=${worker.full_name}&background=random&color=fff`} 
+                  alt={worker.full_name}
+                  className="h-14 w-14 rounded-full ring-4 ring-slate-50 dark:ring-slate-800"
+                />
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-slate-900 dark:text-white text-lg truncate">{worker.full_name}</h3>
+                  
+                  {/* Badges de Roles */}
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {roles.map(role => (
+                      <span key={role} className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border
+                        ${role === 'admin' ? 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/30 dark:text-red-400 dark:border-red-900' : 
+                          role === 'bodeguero' ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-900' :
+                          'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-900'
+                        }
+                      `}>
+                        {role}
+                      </span>
+                    ))}
                   </div>
                 </div>
-                <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                  Activo
-                </span>
               </div>
               
               <div className="mt-6 space-y-3">
@@ -108,9 +141,9 @@ export default function TrabajadoresPage() {
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 }
