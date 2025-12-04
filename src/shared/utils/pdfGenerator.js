@@ -205,3 +205,108 @@ export const generateDocumentPDF = async (sale, company, items) => {
 
   doc.save(`${sale.type}_${documentNumber}.pdf`);
 };
+
+
+export const generatePayrollPDF = (payroll, employee, company) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.width;
+  
+  // Colores
+  const colorPrimary = [30, 41, 59]; // Slate 900
+  const colorAccent = [59, 130, 246]; // Blue 500
+
+  // Header
+  doc.setFontSize(16);
+  doc.setTextColor(...colorPrimary);
+  doc.setFont("helvetica", "bold");
+  doc.text("LIQUIDACIÓN DE SUELDO", pageWidth / 2, 20, { align: 'center' });
+  
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Periodo: ${payroll.period_date}`, pageWidth / 2, 26, { align: 'center' });
+
+  // Datos Empresa y Empleado (Recuadros)
+  doc.setDrawColor(200);
+  doc.setFillColor(250);
+  
+  // Izq: Empresa
+  doc.rect(14, 35, 85, 35, 'F');
+  doc.setFont("helvetica", "bold");
+  doc.text("EMPLEADOR", 18, 42);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(company.company_name || 'Mi Empresa', 18, 48);
+  doc.text(company.rut || '', 18, 53);
+  doc.text(company.address || '', 18, 58);
+
+  // Der: Empleado
+  doc.rect(110, 35, 85, 35, 'F');
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("TRABAJADOR", 114, 42);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(employee.full_name, 114, 48);
+  doc.text(`RUT: ${employee.employee_details?.rut || 'N/A'}`, 114, 53);
+  doc.text(`Cargo: ${employee.employee_details?.job_title || 'N/A'}`, 114, 58);
+
+  let finalY = 80;
+
+  // TABLA DETALLES
+  const rows = [];
+  
+  // 1. Haberes (Ingresos)
+  rows.push([{ content: 'HABERES (INGRESOS)', colSpan: 2, styles: { fontStyle: 'bold', fillColor: [240, 248, 255] } }]);
+  rows.push(['Sueldo Base', `$ ${parseInt(payroll.base_salary).toLocaleString()}`]);
+  
+  let totalBonos = 0;
+  if (payroll.bonuses && payroll.bonuses.length > 0) {
+    payroll.bonuses.forEach(b => {
+      rows.push([b.concept, `$ ${parseInt(b.amount).toLocaleString()}`]);
+      totalBonos += parseInt(b.amount);
+    });
+  }
+
+  // 2. Descuentos
+  rows.push([{ content: 'DESCUENTOS', colSpan: 2, styles: { fontStyle: 'bold', fillColor: [255, 240, 240] } }]);
+  let totalDescuentos = 0;
+  if (payroll.deductions && payroll.deductions.length > 0) {
+    payroll.deductions.forEach(d => {
+      rows.push([d.concept, `$ -${parseInt(d.amount).toLocaleString()}`]);
+      totalDescuentos += parseInt(d.amount);
+    });
+  }
+
+  // 3. Totales
+  const totalLiquido = parseInt(payroll.base_salary) + totalBonos - totalDescuentos;
+  
+  rows.push([{ content: '', colSpan: 2, styles: { fillColor: [255, 255, 255] } }]); // Espacio
+  rows.push([
+    { content: 'TOTAL A PAGAR (LÍQUIDO)', styles: { fontStyle: 'bold', fontSize: 12, textColor: colorAccent } },
+    { content: `$ ${totalLiquido.toLocaleString()}`, styles: { fontStyle: 'bold', fontSize: 12, textColor: colorAccent, halign: 'right' } }
+  ]);
+
+  autoTable(doc, {
+    startY: finalY,
+    body: rows,
+    theme: 'grid',
+    styles: { cellPadding: 3 },
+    columnStyles: {
+      0: { cellWidth: 130 },
+      1: { cellWidth: 50, halign: 'right' }
+    }
+  });
+
+  // Firmas
+  const pageHeight = doc.internal.pageSize.height;
+  const firmaY = pageHeight - 40;
+
+  doc.line(30, firmaY, 90, firmaY);
+  doc.text("Firma Empleador", 60, firmaY + 5, { align: 'center' });
+
+  doc.line(120, firmaY, 180, firmaY);
+  doc.text("Firma Trabajador", 150, firmaY + 5, { align: 'center' });
+  doc.text("Recibí conforme", 150, firmaY + 10, { align: 'center' });
+
+  doc.save(`Liquidacion_${employee.full_name}_${payroll.period_date}.pdf`);
+};

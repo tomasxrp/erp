@@ -1,23 +1,26 @@
 import { useState } from 'react';
-import { UserPlus, Mail, Phone, Loader2, Shield, User, Settings } from 'lucide-react';
+import { UserPlus, Mail, Phone, Loader2, Shield, User, Settings, FileText } from 'lucide-react';
 import { useTrabajadores } from '../hooks/useTrabajadores';
 import TrabajadorForm from '../components/TrabajadorForm';
-import RoleManagerModal from '../components/RoleManagerModal'; // <--- IMPORTAR
+import RoleManagerModal from '../components/RoleManagerModal';
+import EmployeeDetailModal from '../components/EmployeeDetailModal'; // Importamos el modal de RRHH
 import { trabajadorService } from '../services/trabajadorService';
-import { useAuth } from '../../../store/AuthContext'; // Para saber si SOY admin
+import { useAuth } from '../../../store/AuthContext';
 
 export default function TrabajadoresPage() {
   const { trabajadores, loading, error, refetch } = useTrabajadores();
-  const { user } = useAuth(); // Usuario logueado
+  const { user } = useAuth(); // Usuario logueado actual
   
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [roleModalWorker, setRoleModalWorker] = useState(null); // Trabajador seleccionado para editar
+  // Estados para controlar los modales
+  const [isFormOpen, setIsFormOpen] = useState(false); // Crear usuario
+  const [roleModalWorker, setRoleModalWorker] = useState(null); // Editar roles
+  const [selectedWorkerId, setSelectedWorkerId] = useState(null); // Ver ficha/nómina
   const [saving, setSaving] = useState(false);
 
-  // Crear Usuario
+  // Lógica: Crear Nuevo Trabajador
   const handleCreateUser = async (formData) => {
     const confirmacion = window.confirm(
-      "ATENCIÓN: Al crear un nuevo usuario, tu sesión se cerrará.\n¿Deseas continuar?"
+      "ATENCIÓN: Al crear un nuevo usuario, tu sesión se cerrará automáticamente por seguridad.\n\n¿Deseas continuar?"
     );
     if (!confirmacion) return;
 
@@ -25,40 +28,44 @@ export default function TrabajadoresPage() {
     try {
       await trabajadorService.createTrabajador(formData);
       setIsFormOpen(false);
-      window.location.reload(); 
+      window.location.reload(); // Recargar para limpiar sesión antigua
     } catch (err) {
       alert("Error: " + err.message);
       setSaving(false);
     }
   };
 
-  // Guardar Roles (Admin Panel)
+  // Lógica: Actualizar Roles (Admin Panel)
   const handleUpdateRoles = async (id, newRoles) => {
     try {
       await trabajadorService.updateWorkerRoles(id, newRoles);
-      await refetch(); // Recargar lista para ver cambios
+      await refetch(); // Recargar lista para ver los cambios
     } catch (err) {
       alert("Error al actualizar roles: " + err.message);
     }
   };
 
-  // Helper para verificar si SOY admin (buscamos mi perfil en la lista cargada)
+  // Helper para verificar si el usuario logueado es Admin
   const myProfile = trabajadores.find(t => t.id === user?.id);
-  const isAdmin = myProfile?.role?.includes('admin');
+  const isAdmin = Array.isArray(myProfile?.role) 
+    ? myProfile.role.includes('admin') 
+    : myProfile?.role === 'admin';
 
   if (loading) return <div className="flex h-96 items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-blue-600" /></div>;
   if (error) return <div className="p-4 bg-red-50 text-red-600 rounded-lg">{error}</div>;
 
   return (
     <div className="space-y-6 relative">
+      {/* Header de la Página */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Equipo de Trabajo</h1>
           <p className="text-slate-500 dark:text-slate-400">
-            {trabajadores.length} usuarios activos
+            {trabajadores.length} usuarios activos en tu empresa.
           </p>
         </div>
         
+        {/* Botón Agregar (Solo Admin) */}
         {isAdmin && (
           <button 
             onClick={() => setIsFormOpen(true)}
@@ -69,6 +76,9 @@ export default function TrabajadoresPage() {
         )}
       </div>
 
+      {/* --- MODALES --- */}
+      
+      {/* 1. Modal Crear Usuario */}
       {isFormOpen && (
         <TrabajadorForm 
           onClose={() => setIsFormOpen(false)} 
@@ -77,7 +87,7 @@ export default function TrabajadoresPage() {
         />
       )}
 
-      {/* Modal de Roles */}
+      {/* 2. Modal Gestionar Roles */}
       {roleModalWorker && (
         <RoleManagerModal 
           worker={roleModalWorker}
@@ -86,6 +96,15 @@ export default function TrabajadoresPage() {
         />
       )}
 
+      {/* 3. Modal Ficha Técnica y Nómina */}
+      {selectedWorkerId && (
+        <EmployeeDetailModal 
+          workerId={selectedWorkerId} 
+          onClose={() => setSelectedWorkerId(null)} 
+        />
+      )}
+
+      {/* --- GRID DE TRABAJADORES --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {trabajadores.map((worker) => {
           // Normalizamos roles a array por seguridad
@@ -94,17 +113,18 @@ export default function TrabajadoresPage() {
           return (
             <div key={worker.id} className="group bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-all relative">
               
-              {/* Botón Admin Panel (Solo visible si soy admin) */}
+              {/* Botón Flotante: Configurar Roles (Solo Admin) */}
               {isAdmin && (
                 <button 
                   onClick={() => setRoleModalWorker(worker)}
                   className="absolute top-4 right-4 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-full transition-colors opacity-0 group-hover:opacity-100"
-                  title="Gestionar Roles"
+                  title="Gestionar Roles y Permisos"
                 >
                   <Settings size={18} />
                 </button>
               )}
 
+              {/* Info Principal */}
               <div className="flex items-start gap-4">
                 <img 
                   src={`https://ui-avatars.com/api/?name=${worker.full_name}&background=random&color=fff`} 
@@ -130,6 +150,7 @@ export default function TrabajadoresPage() {
                 </div>
               </div>
               
+              {/* Info Contacto */}
               <div className="mt-6 space-y-3">
                 <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg">
                   <Mail size={16} className="text-slate-400" /> 
@@ -140,6 +161,17 @@ export default function TrabajadoresPage() {
                   <span>{worker.phone || 'Sin teléfono'}</span>
                 </div>
               </div>
+
+              {/* Botón Ver Ficha (RRHH) */}
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                 <button 
+                   onClick={() => setSelectedWorkerId(worker.id)}
+                   className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1 transition-colors"
+                 >
+                   <FileText size={16} /> Ver Ficha y Nómina
+                 </button>
+              </div>
+
             </div>
           );
         })}

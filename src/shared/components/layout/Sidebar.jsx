@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Users, Package, FileText, ShoppingCart, BarChart3, Box, Briefcase, X , Settings, Wrench } from 'lucide-react';
+import { Users, Package, FileText, ShoppingCart, BarChart3, Box, Briefcase, X , Settings, Wrench,Building2 } from 'lucide-react';
 import { useAuth } from '../../../store/AuthContext'; // <--- IMPORTAR
 
 export default function Sidebar({ isOpen, onClose }) {
@@ -18,6 +18,8 @@ export default function Sidebar({ isOpen, onClose }) {
     { path: '/inventario', label: 'Inventario', icon: Package, roles: ['admin', 'vendedor','bodeguero'] },
     { path: '/servicios', label: 'Servicios', icon: Wrench, roles: ['admin', 'vendedor','bodeguero'] },
     { path: '/ventas', label: 'Ventas', icon: ShoppingCart, roles: ['admin', 'vendedor'] },
+    { path: '/compras/ordenes', label: 'Órdenes Compra', icon: ShoppingCart, roles: ['admin', 'bodeguero'] },
+  { path: '/compras/proveedores', label: 'Proveedores', icon: Building2, roles: ['admin', 'bodeguero'] },
     { path: '/proyectos', label: 'Proyectos Activos', icon: Briefcase, roles: ['admin', 'bodeguero', 'vendedor'] },
     { path: '/crm', label: 'Clientes / CRM', icon: Briefcase, roles: ['admin', 'vendedor'] },
     { path: '/registros', label: 'Historial / Registros', icon: FileText, roles: ['admin', 'vendedor'] },

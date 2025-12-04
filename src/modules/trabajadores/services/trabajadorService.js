@@ -14,14 +14,9 @@ async function getMyWarehouseId() {
   return data?.warehouse_id;
 }
 
-
-
-
-
 export const trabajadorService = {
-  // Obtener lista de trabajadores (Solo de mi bodega)
+  // 1. Obtener lista de trabajadores
   async getTrabajadores() {
-    // Gracias al RLS y get_my_warehouse_id(), esto ya filtra solo tus empleados
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -30,27 +25,12 @@ export const trabajadorService = {
     if (error) throw error;
     return data;
   },
-  
-  async updateWorkerRoles(id, newRolesArray) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ role: newRolesArray }) // Enviamos el array ej: ['admin', 'vendedor']
-      .eq('id', id)
-      .select()
-      .single();
 
-    if (error) throw error;
-    return data;
-  },
-
-  // Crear Trabajador (CON HERENCIA DE BODEGA)
+  // 2. Crear Trabajador (Con herencia de bodega)
   async createTrabajador(userData) {
-    // 1. Obtener mi ID de bodega para pasárselo al nuevo empleado
     const myWarehouseId = await getMyWarehouseId();
     if (!myWarehouseId) throw new Error("No se pudo identificar tu bodega.");
 
-    // 2. Registrar usuario pasando el warehouse_id en los metadatos
-    // IMPORTANTE: Esto cerrará la sesión actual del administrador en el navegador
     const { data, error } = await supabase.auth.signUp({
       email: userData.email,
       password: userData.password,
@@ -58,7 +38,7 @@ export const trabajadorService = {
         data: {
           full_name: userData.full_name,
           role: userData.role || 'vendedor',
-          warehouse_id: myWarehouseId // <--- ESTO ACTIVA LA HERENCIA EN SQL
+          warehouse_id: myWarehouseId
         },
       },
     });
@@ -67,12 +47,104 @@ export const trabajadorService = {
     return data;
   },
 
-  // Eliminar trabajador (Opcional, pero útil)
+  // 3. Actualizar Trabajador (Genérico: Teléfono, Nombre, etc.) - ESTA FALTABA
+  async updateTrabajador(id, updates) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  // 4. Actualizar Roles (Admin Panel)
+  async updateWorkerRoles(id, newRolesArray) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ role: newRolesArray })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  // 5. Eliminar trabajador
   async deleteTrabajador(id) {
-    // Nota: Supabase Auth no permite borrar usuarios desde el cliente fácilmente.
-    // Esto solo borraría el perfil, pero el usuario Auth seguiría existiendo.
-    // Para borrar completamente se requiere una Edge Function (Backend).
     const { error } = await supabase.from('profiles').delete().eq('id', id);
+    if (error) throw error;
+  },
+
+  // --- MÓDULO RRHH (NUEVO) ---
+
+  // 6. Obtener detalle completo (Perfil + Datos Laborales)
+  async getEmployeeFullDetails(id) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`
+        *,
+        employee_details (*)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  // 7. Guardar/Actualizar Ficha Laboral
+  async upsertEmployeeDetails(details) {
+    const warehouse_id = await getMyWarehouseId();
+    
+    const { data, error } = await supabase
+      .from('employee_details')
+      .upsert({ 
+        ...details,
+        warehouse_id 
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  // 8. Obtener Nóminas
+  async getEmployeePayrolls(employeeId) {
+    const { data, error } = await supabase
+      .from('payrolls')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('period_date', { ascending: false });
+
+    if (error) throw error;
+    return data;
+  },
+
+  // 9. Crear Nómina
+  async createPayroll(payrollData) {
+    const warehouse_id = await getMyWarehouseId();
+    
+    const { data, error } = await supabase
+      .from('payrolls')
+      .insert([{
+        ...payrollData,
+        warehouse_id
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+  
+  // 10. Eliminar Nómina
+  async deletePayroll(id) {
+    const { error } = await supabase.from('payrolls').delete().eq('id', id);
     if (error) throw error;
   }
 };
