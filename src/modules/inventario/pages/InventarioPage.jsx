@@ -99,7 +99,7 @@ export default function InventoryPage() {
                 <th className="px-6 py-4">SKU / Código</th>
                 <th className="px-6 py-4">Categoría</th>
                 <th className="px-6 py-4 text-center">Stock Total</th>
-                <th className="px-6 py-4 text-right">Precio Venta</th>
+                <th className="px-6 py-4 text-right">Precio Neto</th>
                 <th className="px-6 py-4 text-center">Acciones</th>
               </tr>
             </thead>

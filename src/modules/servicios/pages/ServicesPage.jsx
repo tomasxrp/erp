@@ -89,7 +89,7 @@ export default function ServicesPage() {
                 <th className="px-6 py-4">Categoría</th>
                 <th className="px-6 py-4">Unidad</th>
                 <th className="px-6 py-4 text-right">Costo Est.</th>
-                <th className="px-6 py-4 text-right">Precio Venta</th>
+                <th className="px-6 py-4 text-right">Precio Neto</th>
                 <th className="px-6 py-4 text-center">Acciones</th>
               </tr>
             </thead>

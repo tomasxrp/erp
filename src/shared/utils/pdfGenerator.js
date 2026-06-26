@@ -23,9 +23,9 @@ export const generateDocumentPDF = async (sale, company, items) => {
   const colorSecondary = [60, 60, 60];
   const colorLight = [245, 245, 245];
 
-  const totalAmount = sale.total_amount || 0;
-  const netAmount = Math.round(totalAmount / 1.19);
-  const taxAmount = totalAmount - netAmount;
+  const totalAmount = Number(sale.total_amount || 0);
+  const netAmount = sale.net_amount !== undefined && sale.net_amount !== null ? Number(sale.net_amount) : Math.round(totalAmount / 1.19);
+  const taxAmount = sale.tax_amount !== undefined && sale.tax_amount !== null ? Number(sale.tax_amount) : (totalAmount - netAmount);
 
   // Tipo y número de documento
   let title = 'DOCUMENTO';
@@ -178,10 +178,18 @@ export const generateDocumentPDF = async (sale, company, items) => {
   const tableStartY = clientY + 34;
 
   const tableRows = items.map(item => {
-    const precioBrutoUnitario = item.unit_price;
-    const precioNetoUnitario = Math.round(precioBrutoUnitario / 1.19);
     const cantidad = item.quantity;
-    const totalNeto = precioNetoUnitario * cantidad;
+    let precioNetoUnitario;
+    let totalNeto;
+
+    if (sale.type === 'cotizacion') {
+      precioNetoUnitario = item.unit_price;
+      totalNeto = precioNetoUnitario * cantidad;
+    } else {
+      const precioBrutoUnitario = item.unit_price;
+      precioNetoUnitario = Math.round(precioBrutoUnitario / 1.19);
+      totalNeto = precioNetoUnitario * cantidad;
+    }
 
     return [
       cantidad,

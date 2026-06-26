@@ -85,9 +85,9 @@ export default function CotizacionPage() {
   const removeFromCart = (id) => setCart(cart.filter(i => i.id !== id));
 
   const calculateTotals = () => {
-    const total = cart.reduce((acc, item) => acc + (item.unit_price * item.quantity), 0);
-    const net = Math.round(total / 1.19);
-    const tax = total - net;
+    const net = cart.reduce((acc, item) => acc + (item.unit_price * item.quantity), 0);
+    const tax = Math.round(net * 0.19);
+    const total = net + tax;
     return { net, tax, total };
   };
   const handleCheckout = async () => {

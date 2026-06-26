@@ -101,7 +101,7 @@ export default function ServiceForm({ onClose, onSubmit, initialData, isEditing,
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Precio Venta</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Precio Neto</label>
               <div className="relative">
                 <DollarSign className="absolute left-3 top-2.5 h-5 w-5 text-emerald-500" />
                 <input
